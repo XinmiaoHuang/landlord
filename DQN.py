@@ -54,27 +54,6 @@ class DQN():
         self.kick_dims = 28
         self.max_len = 62
 
-    def random_aciton(self, has_prev=True):
-        """
-        随机打出一手牌 54x1的向量形式
-        :param has_prev:是否有上家
-        :return:打出的手牌，54x1, one-hot向量形式， 动作向量对应标号，带牌对应标号
-         kick_set 保存带牌编号的列表
-        """
-        act_num = random.randint(1, 308)
-        act_str = label2char[act_num]
-        if act_str[-1] not in ['P', 'A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'X', 'D']:
-            kicker = self.get_kicker(kick_type=act_str[-1])
-        else:
-            kicker = np.zeros(shape=(self.kick_dims,))
-        vec = np.zeros(shape=(309,))
-        vec[act_num] += 1
-        act_vec, kick_vec = convert2vec(vec, kicker, self.state)
-        if not has_prev:
-            return act_vec+kick_vec, act_num, kicker
-        else:
-            return act_vec+kick_vec, act_num, kicker
-
     def get_kicker(self, kick_type=None, is_random=True):
         """
         随机打出一张带牌,28x1的多标签向量
@@ -128,6 +107,24 @@ class DQN():
                 res[num-1] += 1
         return res
 
+    def random_aciton(self, has_prev=True):
+        """
+        随机打出一手牌 54x1的向量形式
+        :param has_prev:是否有上家
+        :return:打出的手牌，54x1, one-hot向量形式， 动作向量对应标号，带牌对应标号
+         kick_set 保存带牌编号的列表
+        """
+        act_num = random.randint(1, 308)
+        act_str = label2char[act_num]
+        if act_str[-1] not in ['P', 'A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'X', 'D']:
+            kicker = self.get_kicker(kick_type=act_str[-1])
+        else:
+            kicker = np.zeros(shape=(self.kick_dims,))
+        vec = np.zeros(shape=(309,))
+        vec[act_num] += 1
+        act_vec= convert2vec(vec, kicker, self.state)
+        return act_vec, act_num, kicker
+
     def model_predict(self, state_in, act_in, kick_in):
         """
 
@@ -147,12 +144,11 @@ class DQN():
             state = np.concatenate((state, extra-1), axis=-1)
         act, kick = model.predict([state, act_in, kick_in])
         print("pos: {}, Q_net_prediction: Q_act: {}, kick_act: {}".format(self.position, np.max(act), np.max(kick)))
-        #assert len(kick.shape) == 1
         return act[0], kick[0]
 
     def e_greedy_action(self):
         """
-        :return: (54x1向量的动作向量， 动作向量对应的标号， 带牌对应的标号)
+        :return: (54x1向量的动作向量， 动作向量对应的标号， 带牌对应的标号
         """
         if random.random() < self.epsilon:
             #self.epsilon *= 0.95
@@ -161,10 +157,8 @@ class DQN():
         else:
             act, kick = self.model_predict(self.state, np.zeros((1, 309,)), np.zeros((1, 28,)))
             act_num = np.argmax(act)
-            act_vec, kick_vec = convert2vec(act, kick, self.state)
-            if ((label2char[act_num])[-1]) not in ['P', 'A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'X', 'D']:
-                kick_vec = np.zeros(shape=(54,))
-            return act_vec+kick_vec, act_num, kick
+            act_vec = convert2vec(act, kick, self.state)
+            return act_vec, act_num, kick
 
     def do_move(self, action):
         # 如果出了自己没有的牌，判定为游戏失败
@@ -197,17 +191,13 @@ class DQN():
                 return next_state, -4, True
 
     def update(self, action, is_myturn=True):
+        action = np.expand_dims(action, -1)
+        if len(self.state.shape) == 1:
+            self.state = np.expand_dims(self.state, -1)
+        new_state = np.concatenate((self.state, action), -1)
         if not is_myturn:
-            action = np.expand_dims(action, -1)
-            if len(self.state.shape) == 1:
-                self.state = np.expand_dims(self.state, -1)
-            new_state = np.concatenate((self.state, action), -1)
             return new_state
         else:
-            action = np.expand_dims(action, -1)
-            if len(self.state.shape) == 1:
-                self.state = np.expand_dims(self.state, -1)
-            new_state = np.concatenate((self.state, action), -1)
             for index, num in enumerate(action):
                 new_state[index, 0] -= num
             return new_state
@@ -273,12 +263,7 @@ class DQN():
                 model.train_on_batch([state_batch, actions, kick_bacth], [act_gt, kick_gt])
 
     def save_model(self):
-        # if self.position == 0:
         model.save_weights('./lord_model_new.h5')
-        # if self.position == 1:
-        #     model.save_weights('./pe1_model.h5')
-        # if self.position == 2:
-        #     model.save_weights('./pe2_model.h5')
 
 
 def reset(data):
@@ -294,18 +279,15 @@ def round(player_1, player_2, player_3):
     action, act_num, kick_set = player_1.e_greedy_action()
     print("#####################  pos:{}, play:{}  ##########################".format(player_1.position, vec2str(action)))
     next_state, reward, done = player_1.do_move(action)
+    player_1.train(act_num, reward, next_state, done, kick_set)
+    player_1.state = next_state
+    player_2.state = player_2.update(action, is_myturn=False)
+    player_3.state = player_3.update(action, False)
+
     # 游戏结束
     if done:
-        player_1.train(act_num, reward, next_state, done, kick_set)
-        player_1.state = next_state
-        player_2.state = player_2.update(action, is_myturn=False)
-        player_3.state = player_3.update(action, False)
         return True
     else:
-        player_1.train(act_num, reward, next_state, done, kick_set)
-        player_1.state = next_state
-        player_2.state = player_2.update(action, is_myturn=False)
-        player_3.state = player_3.update(action, False)
         return False
 
 
@@ -319,10 +301,7 @@ if __name__ == '__main__':
     lord = DQN(position=0, state=card_lord)     # 默认1号为地主，以后有机会在考虑其他情况
     peasant_1 = DQN(1, card_1)
     peasant_2 = DQN(2, card_2)
-    model.load_weights('./lord_model_new.h5')
-    # lord.model.load_weights('./lord_model.h5')
-    # peasant_1.model.load_weights('./pe1_model.h5')
-    # peasant_2.model.load_weights('./pe2_model.h5')
+    model.load_weights('./lord_model.h5')
     epochs = 1000
     steps = 400
     round_sum = 0

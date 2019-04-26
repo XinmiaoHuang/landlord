@@ -161,7 +161,8 @@ def act2vec(str, state):
                 local_state[number + i] -= 1
                 break
         else:
-            res[number] += 1
+            res = np.ones(shape=(54,))
+            return res
     return res
 
 
@@ -176,12 +177,11 @@ def choose_act(num):
     return vec
 
 
-def kick2vec(kick_out, state):
+def kick2str(kick_out, state):
     act_list = ''
     for kick_num in kick_out:
         act_list += label2char[kick_num]
-    res = act2vec(act_list, state)
-    return res
+    return act_list
 # def kick2vec(kick_out):
 #     res = np.zeros(shape=(54, 1), dtype=int)
 #     for num in kick_out:
@@ -254,12 +254,15 @@ def convert2vec(act, kick, state):
     if len(kick.shape) != 1:
         kick = kick[0]
     act_str = label2char[np.argmax(act)]
-    act_vec = act2vec(act_str, state)
     kick_type = act_str[-1]
     if kick_type in ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '?']:
         kick_num = kick_loop[kick_type]
         kick_choice = get_n_largest(kick, kick_num)
-        kick_vec = kick2vec(kick_choice, state)
-        return act_vec, kick_vec
+        kick_str = kick2str(kick_choice, state)
+        act_str = act_str[:-1]
+        act_str += kick_str
+        act_vec = act2vec(act_str, state)
+        return act_vec
     else:
-        return act_vec, np.zeros(shape=(54,))
+        act_vec = act2vec(act_str, state)
+        return act_vec
